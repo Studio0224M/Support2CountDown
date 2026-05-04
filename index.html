@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>予測カウンター Pro</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#3b82f6">
+<link rel="apple-touch-icon" href="icon.png">
+
+<script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js');
+        });
+    }
+</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #f3f4f6;
+            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+            overflow-x: hidden;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: pan-y;
+        }
+        .row-height { height: 3.8rem; }
+        .tapped {
+            background-color: #d1fae5 !important;
+            border-left: 6px solid #10b981;
+            transform: translateX(4px);
+        }
+        .next-target {
+            outline: 3px solid #3b82f6;
+            outline-offset: -3px;
+            z-index: 10;
+            animation: pulse-outline 2s infinite;
+        }
+        @keyframes pulse-outline {
+            0% { outline-color: rgba(59, 130, 246, 1); }
+            50% { outline-color: rgba(59, 130, 246, 0.3); }
+            100% { outline-color: rgba(59, 130, 246, 1); }
+        }
+        .past-row {
+            opacity: 0.4;
+            background-color: #e5e7eb !important;
+            filter: grayscale(1);
+            outline: none !important;
+        }
+        .sticky-header { position: sticky; top: 0; z-index: 20; background-color: white; }
+        @keyframes flash-bg {
+            0% { background-color: transparent; }
+            50% { background-color: rgba(251, 191, 36, 0.7); }
+            100% { background-color: transparent; }
+        }
+        .flash-active {
+            animation: flash-bg 0.5s ease-in-out 3;
+            pointer-events: none;
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh; z-index: 100;
+        }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button {
+            -webkit-appearance: none; margin: 0;
+        }
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(2px);
+            transition: opacity 0.3s ease;
+        }
+    </style>
+</head>
+<body class="p-0">
+    <div id="flashOverlay" class="pointer-events-none fixed inset-0"></div>
+
+    <!-- 設定ダイアログ -->
+    <div id="settingsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay">
+        <div class="bg-white w-full max-w-xs rounded-2xl shadow-2xl overflow-hidden">
+            <div class="bg-slate-800 p-4 text-white text-center font-bold">アラート設定</div>
+            <div class="p-4 space-y-4">
+                <p class="text-[10px] text-gray-500 text-center mb-2">通知タイミング（秒前）を入力してください<br>通知しない場合は空欄または0</p>
+                
+                <div class="space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="font-bold text-slate-700 w-12">30k</span>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="cfg-30000" class="w-20 text-center border-2 border-slate-200 rounded-lg p-2 font-bold focus:border-blue-500 outline-none" placeholder="OFF">
+                            <span class="text-xs text-gray-500 font-bold">秒前</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="font-bold text-slate-700 w-12">20k</span>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="cfg-20000" class="w-20 text-center border-2 border-slate-200 rounded-lg p-2 font-bold focus:border-blue-500 outline-none" placeholder="OFF">
+                            <span class="text-xs text-gray-500 font-bold">秒前</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="font-bold text-slate-700 w-12">10k</span>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="cfg-10000" class="w-20 text-center border-2 border-slate-200 rounded-lg p-2 font-bold focus:border-blue-500 outline-none" placeholder="OFF">
+                            <span class="text-xs text-gray-500 font-bold">秒前</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="font-bold text-slate-700 w-12">5k</span>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="cfg-5000" class="w-20 text-center border-2 border-slate-200 rounded-lg p-2 font-bold focus:border-blue-500 outline-none" placeholder="OFF">
+                            <span class="text-xs text-gray-500 font-bold">秒前</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pt-4 flex gap-2">
+                    <button onclick="closeSettings(false)" class="flex-1 py-3 rounded-xl font-bold bg-gray-100 text-gray-600 active:bg-gray-200">キャンセル</button>
+                    <button onclick="closeSettings(true)" class="flex-1 py-3 rounded-xl font-bold bg-blue-600 text-white active:bg-blue-700 shadow-lg shadow-blue-200">保存してON</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-md mx-auto bg-white min-h-screen shadow-lg overflow-hidden border-x border-gray-200">
+        
+        <!-- ヘッダーエリア -->
+        <div class="sticky-header shadow-sm border-b">
+            <div class="bg-slate-800 py-3 px-4 text-white flex justify-between items-center">
+                <button onclick="undoLastTap()" class="bg-slate-500 active:bg-slate-600 text-white text-xs px-4 py-2 rounded-lg font-bold transition-all border border-slate-400">戻す</button>
+                <div class="flex flex-col items-center">
+                    <h1 class="text-base font-bold text-white">予測カウンター</h1>
+                </div>
+                <button onclick="performReset()" class="bg-red-600 active:bg-red-700 text-white text-xs px-4 py-2 rounded-lg font-bold transition-all border border-red-500">リセット</button>
+            </div>
+
+            <div class="px-4 py-3 bg-white">
+                <div class="flex items-center justify-between bg-blue-50 p-3 rounded-xl border border-blue-100 gap-3">
+                    <div class="flex flex-col">
+                        <label for="baseValue" class="text-[10px] font-bold text-blue-900 uppercase">受入量</label>
+                        <input type="number" id="baseValue" value="22000" class="w-24 text-xl font-bold text-center bg-white border-2 border-blue-200 rounded-lg p-1 transition-all">
+                    </div>
+                    <div class="grid grid-cols-2 gap-1.5 flex-1">
+                        <button onclick="adjustBaseValue(10000)" class="bg-blue-600 text-white text-sm font-bold py-1.5 rounded-lg active:bg-blue-700">+100k</button>
+                        <button onclick="adjustBaseValue(1000)" class="bg-white border border-blue-200 text-blue-700 text-sm font-bold py-1.5 rounded-lg active:bg-blue-100">+10k</button>
+                        <button onclick="adjustBaseValue(-10000)" class="bg-blue-600 text-white text-sm font-bold py-1.5 rounded-lg active:bg-blue-700">-100k</button>
+                        <button onclick="adjustBaseValue(-1000)" class="bg-white border border-blue-200 text-blue-700 text-sm font-bold py-1.5 rounded-lg active:bg-blue-100">-10k</button>
+                    </div>
+                    <!-- アラートボタン -->
+                    <button id="alertBtn" onclick="handleAlertBtnClick()" class="flex flex-col items-center justify-center bg-gray-100 p-2 rounded-xl border border-gray-200 transition-all w-16 h-16 active:scale-95">
+                        <svg id="bellIcon" xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                        </svg>
+                        <span id="alertStatusText" class="text-[9px] font-bold text-gray-400 mt-1">OFF</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- コンテンツエリア -->
+        <div class="px-2 pb-20">
+            <div id="customInputs" class="space-y-2 pt-2 mb-2 border-b-2 border-dashed border-gray-100 pb-4">
+                <div id="custom-row-0" class="flex items-center justify-between px-3 row-height rounded-xl border border-gray-100 bg-gray-50 shadow-sm transition-all"
+                     ontouchstart="handleTouchStart(event, 'custom', 0)" ontouchend="handleTouchEnd(event, 'custom', 0)"
+                     onmousedown="handleMouseDown(event, 'custom', 0)" onmouseup="handleMouseUp(event, 'custom', 0)">
+                    <div class="w-[35%]">
+                        <input type="number" id="custom-input-0" placeholder="0" class="w-full bg-transparent border-b-2 border-blue-200 text-lg font-bold text-blue-800 outline-none p-1" 
+                               onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()"
+                               onchange="updateCustomValue(0, this.value)">
+                    </div>
+                    <div class="w-[20%]"></div>
+                    <div class="w-[45%] text-right"><span id="custom-time-0" class="text-xl font-mono font-bold text-gray-300">--:--:--</span></div>
+                </div>
+                <div id="custom-row-1" class="flex items-center justify-between px-3 row-height rounded-xl border border-gray-100 bg-gray-50 shadow-sm transition-all"
+                     ontouchstart="handleTouchStart(event, 'custom', 1)" ontouchend="handleTouchEnd(event, 'custom', 1)"
+                     onmousedown="handleMouseDown(event, 'custom', 1)" onmouseup="handleMouseUp(event, 'custom', 1)">
+                    <div class="w-[35%]">
+                        <input type="number" id="custom-input-1" placeholder="0" class="w-full bg-transparent border-b-2 border-blue-200 text-lg font-bold text-blue-800 outline-none p-1" 
+                               onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()"
+                               onchange="updateCustomValue(1, this.value)">
+                    </div>
+                    <div class="w-[20%]"></div>
+                    <div class="w-[45%] text-right"><span id="custom-time-1" class="text-xl font-mono font-bold text-gray-300">--:--:--</span></div>
+                </div>
+            </div>
+            <div id="resultsList" class="space-y-1.5"></div>
+        </div>
+    </div>
+
+    <script>
+        const aColumnValues = [100000, 80000, 50000, 30000, 20000, 10000, 5000, 3000, 2000, 1000, 900, 800, 700, 600, 500, 400, 300, 200, 100, 0];
+        const STORAGE_KEY = 'prediction_counter_data_v4';
+        
+        let customValues = [0, 0];
+        let customTaps = [null, null];
+        let tapData = new Array(aColumnValues.length).fill(null);
+        let notifiedIndices = new Set();
+        let tapHistory = [];
+        
+        // アラート設定
+        let alertEnabled = false;
+        let alertConfig = {
+            30000: 180, // 30k (180s = 3min)
+            20000: 30,  // 20k
+            10000: 30,  // 10k
+            5000: 30    // 5k
+        };
+
+        let startX = 0, startY = 0;
+        let pressTimer = null, isLongPress = false;
+        const MOVE_THRESHOLD = 20;
+        const LONG_PRESS_MS = 600;
+
+        const baseInput = document.getElementById('baseValue');
+        const flashOverlay = document.getElementById('flashOverlay');
+        const alertBtn = document.getElementById('alertBtn');
+        const bellIcon = document.getElementById('bellIcon');
+        const alertStatusText = document.getElementById('alertStatusText');
+        const settingsModal = document.getElementById('settingsModal');
+
+        function saveData() {
+            const data = {
+                baseValue: baseInput.value,
+                customValues,
+                customTaps: customTaps.map(t => t ? t.getTime() : null),
+                tapData: tapData.map(t => t ? t.getTime() : null),
+                tapHistory: tapHistory.map(h => ({
+                    type: h.type,
+                    idx: h.idx,
+                    t: h.t ? (h.t instanceof Date ? h.t.getTime() : h.t) : null
+                })),
+                notifiedIndices: Array.from(notifiedIndices),
+                alertEnabled,
+                alertConfig
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        }
+
+        function loadData() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (!saved) return;
+            try {
+                const data = JSON.parse(saved);
+                baseInput.value = data.baseValue || "22000";
+                customValues = data.customValues || [0, 0];
+                customTaps = (data.customTaps || [null, null]).map(t => t ? new Date(t) : null);
+                tapData = (data.tapData || new Array(aColumnValues.length).fill(null)).map(t => t ? new Date(t) : null);
+                tapHistory = data.tapHistory || [];
+                notifiedIndices = new Set(data.notifiedIndices || []);
+                alertEnabled = !!data.alertEnabled;
+                if (data.alertConfig) alertConfig = data.alertConfig;
+
+                customValues.forEach((v, i) => {
+                    const input = document.getElementById(`custom-input-${i}`);
+                    if (input) input.value = v > 0 ? v : "";
+                });
+                updateUI(false);
+            } catch (e) {
+                console.error("Data load failed", e);
+            }
+        }
+
+        function handleAlertBtnClick() {
+            if (alertEnabled) {
+                alertEnabled = false;
+                updateUI();
+            } else {
+                openSettings();
+            }
+        }
+
+        function openSettings() {
+            // 現在の値をセット
+            Object.keys(alertConfig).forEach(k => {
+                const input = document.getElementById(`cfg-${k}`);
+                if (input) input.value = alertConfig[k] || "";
+            });
+            settingsModal.classList.remove('hidden');
+        }
+
+        function closeSettings(save) {
+            if (save) {
+                Object.keys(alertConfig).forEach(k => {
+                    const input = document.getElementById(`cfg-${k}`);
+                    const val = parseInt(input.value);
+                    alertConfig[k] = isNaN(val) ? 0 : val;
+                });
+                alertEnabled = true;
+                initAudio();
+                if(window.Notification) Notification.requestPermission();
+                triggerNotification("アラートON", true);
+            }
+            settingsModal.classList.add('hidden');
+            updateUI();
+        }
+
+        let audioCtx = null;
+        function initAudio() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        function playAlertSound() {
+            initAudio();
+            const now = audioCtx.currentTime;
+            const playNote = (freq, start, duration) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(freq, start);
+                gain.gain.setValueAtTime(0.1, start);
+                gain.gain.exponentialRampToValueAtTime(0.01, start + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(start);
+                osc.stop(start + duration);
+            };
+            playNote(880, now, 0.15);
+            playNote(1318.51, now + 0.2, 0.3);
+        }
+
+        function triggerNotification(label = "デモ", isDemo = false) {
+            if (!alertEnabled && !isDemo) return;
+            try { playAlertSound(); } catch (e) {}
+            flashOverlay.classList.add('flash-active');
+            if (navigator.vibrate) {
+                if (isDemo) navigator.vibrate([100, 50, 100]);
+                else navigator.vibrate([300, 100, 300]);
+            }
+            if (window.Notification && Notification.permission === "granted") {
+                new Notification("予測カウンター", { body: isDemo ? label : `${label} 到着予測まであとわずかです` });
+            }
+            setTimeout(() => flashOverlay.classList.remove('flash-active'), 1500);
+        }
+
+        function startAction(x, y, type, idx) {
+            startX = x; startY = y;
+            isLongPress = false;
+            pressTimer = setTimeout(() => {
+                isLongPress = true;
+                if (type === 'custom') customTaps[idx] = null;
+                else { tapData[idx] = null; notifiedIndices.delete(idx); }
+                if (navigator.vibrate) navigator.vibrate(40);
+                updateUI();
+            }, LONG_PRESS_MS);
+        }
+
+        function endAction(x, y, type, idx) {
+            clearTimeout(pressTimer);
+            const moveX = Math.abs(x - startX);
+            const moveY = Math.abs(y - startY);
+            if (moveX < MOVE_THRESHOLD && moveY < MOVE_THRESHOLD && !isLongPress) {
+                executeTap(type, idx);
+            }
+        }
+
+        function handleTouchStart(e, type, idx) { initAudio(); startAction(e.touches[0].pageX, e.touches[0].pageY, type, idx); }
+        function handleTouchEnd(e, type, idx) { endAction(e.changedTouches[0].pageX, e.changedTouches[0].pageY, type, idx); }
+        function handleMouseDown(e, type, idx) { if (e.button === 0) { initAudio(); startAction(e.pageX, e.pageY, type, idx); } }
+        function handleMouseUp(e, type, idx) { if (e.button === 0) endAction(e.pageX, e.pageY, type, idx); }
+
+        function executeTap(type, idx) {
+            notifiedIndices.clear(); 
+            if (type === 'custom') {
+                if (customValues[idx] > 0) {
+                    customTaps[idx] = new Date();
+                    tapHistory.push({ type: 'custom', idx, t: customTaps[idx].getTime() });
+                }
+            } else {
+                tapData[idx] = new Date();
+                tapHistory.push({ type: 'fixed', idx, t: tapData[idx].getTime() });
+            }
+            if (navigator.vibrate) navigator.vibrate(20);
+            updateUI();
+        }
+
+        function formatTime(d) {
+            return d ? d.getHours().toString().padStart(2,'0')+":"+d.getMinutes().toString().padStart(2,'0')+":"+d.getSeconds().toString().padStart(2,'0') : "--:--:--";
+        }
+
+        function adjustBaseValue(amount) {
+            baseInput.value = (parseFloat(baseInput.value) || 0) + amount;
+            notifiedIndices.clear();
+            updateUI();
+        }
+
+        function undoLastTap() {
+            const last = tapHistory.pop();
+            if (!last) return;
+            if (last.type === 'custom') customTaps[last.idx] = null;
+            else { tapData[last.idx] = null; }
+            notifiedIndices.clear();
+            updateUI();
+        }
+
+        function updateCustomValue(i, v) {
+            customValues[i] = parseFloat(v) || 0;
+            notifiedIndices.clear();
+            updateUI();
+        }
+
+        function getPoints() {
+            const b = parseFloat(baseInput.value) || 0;
+            let p = [];
+            customValues.forEach((v, i) => { if (customTaps[i] && v > 0) p.push({ v, t: customTaps[i].getTime() }); });
+            aColumnValues.forEach((r, i) => { if (tapData[i]) p.push({ v: b - r/10, t: tapData[i].getTime() }); });
+            return p.sort((a, b) => a.v - b.v);
+        }
+
+        function updateUI(shouldSave = true) {
+            // アラートボタンの状態反映
+            if (alertEnabled) {
+                alertBtn.classList.remove('bg-gray-100', 'border-gray-200');
+                alertBtn.classList.add('bg-blue-600', 'border-blue-400', 'shadow-lg', 'shadow-blue-200');
+                bellIcon.classList.remove('text-gray-400');
+                bellIcon.classList.add('text-white');
+                alertStatusText.textContent = "ON";
+                alertStatusText.classList.remove('text-gray-400');
+                alertStatusText.classList.add('text-white');
+            } else {
+                alertBtn.classList.remove('bg-blue-600', 'border-blue-400', 'shadow-lg', 'shadow-blue-200');
+                alertBtn.classList.add('bg-gray-100', 'border-gray-200');
+                bellIcon.classList.remove('text-white');
+                bellIcon.classList.add('text-gray-400');
+                alertStatusText.textContent = "OFF";
+                alertStatusText.classList.remove('text-white');
+                alertStatusText.classList.add('text-gray-400');
+            }
+
+            const b = parseFloat(baseInput.value) || 0;
+            const pts = getPoints();
+            const now = Date.now();
+            let pace = null;
+            if (pts.length >= 2) {
+                const latest = pts[pts.length - 1];
+                const first = pts[0];
+                pace = (latest.t - first.t) / (latest.v - first.v);
+            }
+            const lastPoint = pts.length ? pts[pts.length - 1] : null;
+
+            let nextTargetIndex = -1;
+            let minFutureMs = Infinity;
+
+            for (let i = 0; i < 2; i++) {
+                const row = document.getElementById(`custom-row-${i}`);
+                const timeEl = document.getElementById(`custom-time-${i}`);
+                if (customTaps[i]) {
+                    row.classList.add('tapped');
+                    timeEl.className = "text-xl font-mono font-bold text-green-600";
+                } else {
+                    row.classList.remove('tapped');
+                    timeEl.className = "text-xl font-mono font-bold text-gray-300";
+                }
+                timeEl.textContent = formatTime(customTaps[i]);
+            }
+
+            const rowsData = aColumnValues.map((r, i) => {
+                const targetV = b - r/10;
+                let predMs = null;
+                let isPast = false;
+
+                if (!tapData[i] && lastPoint && pace && targetV > lastPoint.v) {
+                    predMs = lastPoint.t + pace * (targetV - lastPoint.v);
+                    if (predMs < now) isPast = true;
+                    if (!isPast && predMs < minFutureMs) {
+                        minFutureMs = predMs;
+                        nextTargetIndex = i;
+                    }
+                }
+                return { r, predMs, isPast, i, targetV };
+            });
+
+            const listHtml = rowsData.map(({ r, predMs, isPast, i, targetV }) => {
+                let timeStr = "--:--:--";
+                const labelText = r >= 1000 ? (r/1000)+'k' : r;
+
+                if (tapData[i]) {
+                    timeStr = formatTime(tapData[i]);
+                } else if (predMs) {
+                    timeStr = formatTime(new Date(predMs));
+                    
+                    // アラート判定
+                    const configSec = alertConfig[r] || 0;
+                    if (alertEnabled && configSec > 0 && !notifiedIndices.has(i)) {
+                        const diffSec = (predMs - now) / 1000;
+                        if (diffSec <= (configSec + 0.5) && diffSec > -1) { 
+                            notifiedIndices.add(i); 
+                            triggerNotification(labelText); 
+                        }
+                    }
+                }
+                
+                const labelStyle = r === 30000 ? 'text-slate-950 font-black' : 'text-slate-700';
+                const timeStyle = tapData[i] ? 'text-green-600 text-xl' : 'text-black text-xl italic';
+                const isNext = (i === nextTargetIndex && !isPast);
+
+                return `
+                    <div class="flex items-center justify-between px-3 row-height rounded-xl border border-gray-100 shadow-sm ${tapData[i]?'tapped':'bg-gray-50'} ${isPast?'past-row':''} ${isNext?'next-target':''}"
+                         ontouchstart="handleTouchStart(event, 'fixed', ${i})" ontouchend="handleTouchEnd(event, 'fixed', ${i})"
+                         onmousedown="handleMouseDown(event, 'fixed', ${i})" onmouseup="handleMouseUp(event, 'fixed', ${i})">
+                        <div class="w-[35%] text-lg font-bold text-blue-900">${targetV.toLocaleString()}</div>
+                        <div class="w-[20%] text-center text-lg font-bold ${labelStyle}">${labelText}</div>
+                        <div class="w-[45%] text-right font-mono font-bold ${timeStyle}">${timeStr}</div>
+                    </div>`;
+            }).join('');
+            document.getElementById('resultsList').innerHTML = listHtml;
+            
+            if (shouldSave) saveData();
+        }
+
+        function performReset() {
+            tapData = new Array(aColumnValues.length).fill(null);
+            customTaps = [null, null];
+            customValues = [0, 0];
+            tapHistory = [];
+            notifiedIndices.clear();
+            const input0 = document.getElementById('custom-input-0');
+            const input1 = document.getElementById('custom-input-1');
+            if(input0) input0.value = "";
+            if(input1) input1.value = "";
+            localStorage.removeItem(STORAGE_KEY);
+            updateUI(true);
+        }
+
+        window.onload = () => {
+            loadData();
+            document.body.addEventListener('touchstart', initAudio, { once: false });
+            document.body.addEventListener('mousedown', initAudio, { once: false });
+        };
+
+        setInterval(() => { updateUI(false); }, 1000);
+        baseInput.addEventListener('input', () => {
+            notifiedIndices.clear(); 
+            updateUI();
+        });
+    </script>
+</body>
+</html>
