@@ -9,9 +9,17 @@
 <link rel="apple-touch-icon" href="icon.png">
 
 <script>
-    if ('serviceWorker' in navigator) {
+    // プレビュー用環境（blobやローカル、iframe、特定の仮想クラウド等）でのサービスワーカーエラーを防ぐため
+    // 安全なhttps/httpホストの通常のドメインでのみサービスワーカーの登録を行うようにガードを追加します
+    if ('serviceWorker' in navigator && 
+        window.location.protocol.startsWith('http') && 
+        !window.location.hostname.includes('usercontent') &&
+        !window.location.hostname.includes('localhost') &&
+        !window.location.hostname.includes('127.0.0.1')) {
         window.addEventListener('load', () => {
-            navigator.serviceWorker.register('sw.js');
+            navigator.serviceWorker.register('sw.js').catch(err => {
+                console.log('ServiceWorker registration skipped or failed: ', err);
+            });
         });
     }
 </script>
@@ -26,6 +34,7 @@
             touch-action: pan-y;
         }
         .row-height { height: 3.8rem; }
+        .row-height-large { height: 5.2rem; } /* 30kカード用の拡張サイズ */
         .tapped {
             background-color: #d1fae5 !important;
             border-left: 6px solid #10b981;
@@ -158,6 +167,7 @@
         <!-- コンテンツエリア -->
         <div class="px-2 pb-20">
             <div id="customInputs" class="space-y-2 pt-2 mb-2 border-b-2 border-dashed border-gray-100 pb-4">
+                <!-- タップ可能な上の2つのカスタム行 -->
                 <div id="custom-row-0" class="flex items-center justify-between px-3 row-height rounded-xl border border-gray-100 bg-gray-50 shadow-sm transition-all"
                      ontouchstart="handleTouchStart(event, 'custom', 0)" ontouchend="handleTouchEnd(event, 'custom', 0)"
                      onmousedown="handleMouseDown(event, 'custom', 0)" onmouseup="handleMouseUp(event, 'custom', 0)">
@@ -352,6 +362,7 @@
             }
         }
 
+        // カスタム行のみに使用されるイベントハンドラ
         function handleTouchStart(e, type, idx) { initAudio(); startAction(e.touches[0].pageX, e.touches[0].pageY, type, idx); }
         function handleTouchEnd(e, type, idx) { endAction(e.changedTouches[0].pageX, e.changedTouches[0].pageY, type, idx); }
         function handleMouseDown(e, type, idx) { if (e.button === 0) { initAudio(); startAction(e.pageX, e.pageY, type, idx); } }
@@ -376,6 +387,16 @@
             return d ? d.getHours().toString().padStart(2,'0')+":"+d.getMinutes().toString().padStart(2,'0')+":"+d.getSeconds().toString().padStart(2,'0') : "--:--:--";
         }
 
+        // 残り時間を「あと〇時間〇分〇秒」の形式にする関数
+        function formatRemainingTime(ms) {
+            if (ms <= 0) return "到達予測超過";
+            const seconds = Math.floor((ms / 1000) % 60);
+            const minutes = Math.floor((ms / (1000 * 60)) % 60);
+            const hours = Math.floor(ms / (1000 * 60 * 60));
+            return `あと ${hours}時間 ${minutes}分 ${seconds}秒`;
+        }
+
+        // 受入量の調整
         function adjustBaseValue(amount) {
             baseInput.value = (parseFloat(baseInput.value) || 0) + amount;
             notifiedIndices.clear();
@@ -488,14 +509,47 @@
                     }
                 }
                 
+                // 追加変更点: 1k (1000) 以下の行は時間表示を消す（空文字にする）
+                if (r <= 1000) {
+                    timeStr = "";
+                }
+                
                 const labelStyle = r === 30000 ? 'text-slate-950 font-black' : 'text-slate-700';
                 const timeStyle = tapData[i] ? 'text-green-600 text-xl' : 'text-black text-xl italic';
                 const isNext = (i === nextTargetIndex && !isPast);
 
+                // --- 30kの追加情報表示ロジック ---
+                if (r === 30000) {
+                    const curTimeStr = formatTime(new Date(now)); // 現在時刻 (時:分:秒)
+                    let countdownText = "";
+                    
+                    if (tapData[i]) {
+                        countdownText = "予測完了（到達済）";
+                    } else if (predMs) {
+                        countdownText = formatRemainingTime(predMs - now);
+                    } else {
+                        countdownText = "予測データ不足";
+                    }
+
+                    // 30k行だけ高さを拡張し（row-height-large）、現在時刻と残り時間を追加するレイアウトにします
+                    return `
+                        <div class="flex flex-col justify-center px-3 row-height-large rounded-xl border border-gray-100 shadow-sm ${tapData[i]?'tapped':'bg-gray-50'} ${isPast?'past-row':''} ${isNext?'next-target':''}">
+                            <!-- 上段: 従来の3カラム構成 -->
+                            <div class="flex items-center justify-between w-full">
+                                <div class="w-[35%] text-lg font-bold text-blue-900">${targetV.toLocaleString()}</div>
+                                <div class="w-[20%] text-center text-lg font-bold ${labelStyle}">${labelText}</div>
+                                <div class="w-[45%] text-right font-mono font-bold ${timeStyle}">${timeStr}</div>
+                            </div>
+                            <!-- 下段: 今回追加する「現在時刻」と「30k予測への残り時間」 -->
+                            <div class="flex justify-between items-center w-full mt-1 pt-1 border-t border-dashed border-gray-200">
+                                <div class="text-[10px] text-slate-500 font-semibold">現在：<span class="font-mono text-slate-700">${curTimeStr}</span></div>
+                                <div class="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">${countdownText}</div>
+                            </div>
+                        </div>`;
+                }
+
                 return `
-                    <div class="flex items-center justify-between px-3 row-height rounded-xl border border-gray-100 shadow-sm ${tapData[i]?'tapped':'bg-gray-50'} ${isPast?'past-row':''} ${isNext?'next-target':''}"
-                         ontouchstart="handleTouchStart(event, 'fixed', ${i})" ontouchend="handleTouchEnd(event, 'fixed', ${i})"
-                         onmousedown="handleMouseDown(event, 'fixed', ${i})" onmouseup="handleMouseUp(event, 'fixed', ${i})">
+                    <div class="flex items-center justify-between px-3 row-height rounded-xl border border-gray-100 shadow-sm ${tapData[i]?'tapped':'bg-gray-50'} ${isPast?'past-row':''} ${isNext?'next-target':''}">
                         <div class="w-[35%] text-lg font-bold text-blue-900">${targetV.toLocaleString()}</div>
                         <div class="w-[20%] text-center text-lg font-bold ${labelStyle}">${labelText}</div>
                         <div class="w-[45%] text-right font-mono font-bold ${timeStyle}">${timeStr}</div>
