@@ -6,7 +6,7 @@
     <title>予測カウンター Pro</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#3b82f6">
-<link rel="apple-touch-icon" href="icon.png">
+<link class="apple-touch-icon" href="icon.png">
 
 <script>
     // プレビュー用環境（blobやローカル、iframe、特定の仮想クラウド等）でのサービスワーカーエラーを防ぐため
@@ -34,7 +34,7 @@
             touch-action: pan-y;
         }
         .row-height { height: 3.8rem; }
-        .row-height-large { height: 5.2rem; } /* 30kカード用の拡張サイズ */
+        .row-height-large { height: 6.6rem; } /* 30kカード用の拡張サイズ（文字拡大に合わせさらに調整） */
         .tapped {
             background-color: #d1fae5 !important;
             border-left: 6px solid #10b981;
@@ -532,6 +532,7 @@
                     }
 
                     // 30k行だけ高さを拡張し（row-height-large）、現在時刻と残り時間を追加するレイアウトにします
+                    // 変更点: 文字サイズをさらに大きく（text-sm、時間はtext-base・残り時間は太字text-smに拡張）
                     return `
                         <div class="flex flex-col justify-center px-3 row-height-large rounded-xl border border-gray-100 shadow-sm ${tapData[i]?'tapped':'bg-gray-50'} ${isPast?'past-row':''} ${isNext?'next-target':''}">
                             <!-- 上段: 従来の3カラム構成 -->
@@ -540,10 +541,10 @@
                                 <div class="w-[20%] text-center text-lg font-bold ${labelStyle}">${labelText}</div>
                                 <div class="w-[45%] text-right font-mono font-bold ${timeStyle}">${timeStr}</div>
                             </div>
-                            <!-- 下段: 今回追加する「現在時刻」と「30k予測への残り時間」 -->
-                            <div class="flex justify-between items-center w-full mt-1 pt-1 border-t border-dashed border-gray-200">
-                                <div class="text-[10px] text-slate-500 font-semibold">現在：<span class="font-mono text-slate-700">${curTimeStr}</span></div>
-                                <div class="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">${countdownText}</div>
+                            <!-- 下段: 「現在時刻」と「30k予測への残り時間」を極大表示 -->
+                            <div class="flex justify-between items-center w-full mt-1.5 pt-1.5 border-t border-dashed border-gray-300">
+                                <div class="text-sm text-slate-700 font-bold">現在：<span class="font-mono text-slate-900 text-base font-extrabold">${curTimeStr}</span></div>
+                                <div class="text-sm text-blue-800 font-extrabold bg-blue-100 px-2.5 py-1 rounded-md border border-blue-300 shadow-sm">${countdownText}</div>
                             </div>
                         </div>`;
                 }
